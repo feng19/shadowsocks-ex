@@ -1,6 +1,6 @@
 defmodule Shadowsocks.Conn.Client do
   alias Shadowsocks.Stream
-  @behaviour  Shadowsocks.Conn
+  @behaviour Shadowsocks.Conn
 
   def init(socket, encoder, parent, args) do
     {atyp, data} = Shadowsocks.Protocol.recv_http_or_socks5(socket)
@@ -21,5 +21,4 @@ defmodule Shadowsocks.Conn.Client do
     |> Shadowsocks.Protocol.recv_iv!()
     |> Shadowsocks.Conn.proxy_stream(socket, parent, 0, :down)
   end
-
 end

@@ -29,7 +29,7 @@ config :shadowsocks, :report,
   conn_min_flow: 5 * 1024 * 1024
 
 config :shadowsocks, :protocol,
-  recv_timeout: 180000,
+  recv_timeout: 180_000,
   anti_max_time: 10000,
   anti_max_bytes: 500,
   anti_detect: true
@@ -37,15 +37,18 @@ config :shadowsocks, :protocol,
 # dynamic block attack ip
 config :shadowsocks, :dynamic_blocklist,
   enable: true,
-  attack_times: 30, # block ip when attack times more than attack_times in collect_duration
-  collect_duration: 3600 * 1000, # collect attack times every collect_duration
-  block_expire: 7 * 3600 * 1000 # how long to block ip
+  # block ip when attack times more than attack_times in collect_duration
+  attack_times: 30,
+  # collect attack times every collect_duration
+  collect_duration: 3600 * 1000,
+  # how long to block ip
+  block_expire: 7 * 3600 * 1000
 
-config :shadowsocks,:skip_localhost, true
+config :shadowsocks, :skip_localhost, true
 # It is also possible to import configuration files, relative to this
 # directory. For example, you can emulate configuration per environment
 # by uncommenting the line below and defining dev.exs, test.exs and such.
 # Configuration from the imported file will override the ones defined
 # here (which is why it is important to import them last).
 #
-import_config "#{Mix.env}.exs"
+import_config "#{Mix.env()}.exs"

@@ -3,12 +3,18 @@ defmodule Shadowsocks.Listener do
   require Shadowsocks.Event
   import Record
 
-  defrecordp :state, lsock: nil, args: nil, port: nil,
-                     up: 0, down: 0, flow_time: 0, udp: nil
+  defrecordp :state, lsock: nil, args: nil, port: nil, up: 0, down: 0, flow_time: 0, udp: nil
 
-  @opts [:binary, {:backlog, 20},{:nodelay, true},
-         {:active, false}, {:packet, :raw},{:reuseaddr, true},
-         {:send_timeout_close, true}, {:buffer, 16384}]
+  @opts [
+    :binary,
+    {:backlog, 20},
+    {:nodelay, true},
+    {:active, false},
+    {:packet, :raw},
+    {:reuseaddr, true},
+    {:send_timeout_close, true},
+    {:buffer, 16384}
+  ]
   @tcp_fastopen_queue_length 5
 
   @default_arg %{ota: false, method: "rc4-md5", udp: false, type: :server}
@@ -23,21 +29,23 @@ defmodule Shadowsocks.Listener do
   @tcp_fastopen_linux 23
 
   def update(pid, args) when is_list(args) do
-    map_arg = for {k, v} <- args, do: {k,v}, into: %{}
+    map_arg = for {k, v} <- args, do: {k, v}, into: %{}
     update(pid, map_arg)
   end
+
   def update(pid, args) do
-    GenServer.call pid, {:update, args}
+    GenServer.call(pid, {:update, args})
   end
 
   def port(pid) do
-    GenServer.call pid, :get_port
+    GenServer.call(pid, :get_port)
   end
 
   def start_link(args) when is_list(args) do
-    map_arg = for {k, v} <- args, do: {k,v}, into: %{}
+    map_arg = for {k, v} <- args, do: {k, v}, into: %{}
     start_link(map_arg)
   end
+
   def start_link(args) when is_map(args) do
     GenServer.start_link(__MODULE__, args)
   end
@@ -46,14 +54,17 @@ defmodule Shadowsocks.Listener do
     args = merge_args(@default_arg, args)
     Process.flag(:trap_exit, true)
 
-    opts = case args do
-             %{ip: ip} when is_tuple(ip) and tuple_size(ip) == 4 ->
-               [{:ip, ip}|@opts]
-             %{ip: ip} when is_tuple(ip) and tuple_size(ip) == 8 ->
-               [{:ip, ip}, :inet6 | @opts]
-             _->
-               [:inet6 | @opts]
-           end
+    opts =
+      case args do
+        %{ip: ip} when is_tuple(ip) and tuple_size(ip) == 4 ->
+          [{:ip, ip} | @opts]
+
+        %{ip: ip} when is_tuple(ip) and tuple_size(ip) == 8 ->
+          [{:ip, ip}, :inet6 | @opts]
+
+        _ ->
+          [:inet6 | @opts]
+      end
 
     with {:ok, lsock} <- :gen_tcp.listen(args.port, opts),
          _ <- enable_tcp_fastopen(lsock),
@@ -67,7 +78,7 @@ defmodule Shadowsocks.Listener do
     end
   end
 
-  def handle_call({:update, args}, _from, state(args: old_args)=state) do
+  def handle_call({:update, args}, _from, state(args: old_args) = state) do
     try do
       args = merge_args(old_args, args)
       # update udp
@@ -75,13 +86,16 @@ defmodule Shadowsocks.Listener do
         {nil, %{udp: true}} ->
           {:ok, pid} = start_udprelay(args)
           {:reply, :ok, state(state, args: args, udp: pid)}
+
         {nil, %{udp: false}} ->
           {:reply, :ok, state(state, args: args)}
+
         {pid, %{udp: true}} when is_pid(pid) ->
-          send pid, {:update, args[:method], args[:password]}
+          send(pid, {:update, args[:method], args[:password]})
           {:reply, :ok, state(state, args: args)}
+
         {pid, %{udp: false}} when is_pid(pid) ->
-          send pid, :stop
+          send(pid, :stop)
           {:reply, :ok, state(state, args: args, udp: nil)}
       end
     rescue
@@ -90,106 +104,125 @@ defmodule Shadowsocks.Listener do
     end
   end
 
-  def handle_call(:get_port, _, state(port: port)=state) do
+  def handle_call(:get_port, _, state(port: port) = state) do
     {:reply, port, state}
   end
 
   def handle_info({:inet_async, lsock, _, {:ok, csock}}, state) do
     with {:ok, {addr, _}} <- :inet.peername(csock),
          false <- Shadowsocks.BlackList.blocked?(addr) do
-          init_conn(lsock, csock, addr, state)
+      init_conn(lsock, csock, addr, state)
     else
       _ ->
         :gen_tcp.close(csock)
     end
 
-    case :prim_inet.async_accept(state(state,:lsock), -1) do
+    case :prim_inet.async_accept(state(state, :lsock), -1) do
       {:ok, _} ->
         {:noreply, state}
+
       {:error, ref} ->
         {:stop, {:async_accept, :inet.format_error(ref)}, state}
     end
-
   end
 
   def handle_info({:inet_async, _lsock, _ref, error}, state) do
     {:stop, error, state}
   end
+
   # UDP
   def handle_info({:flow, down, up}, state) do
     {:noreply, save_flow(down, up, state)}
   end
+
   # TCP
   def handle_info({:flow, pid, down, up}, state) do
-    with {addr,old_down, old_up} <- Process.get(pid) do
-      Process.put(pid, {addr,old_down+down, old_up+up})
+    with {addr, old_down, old_up} <- Process.get(pid) do
+      Process.put(pid, {addr, old_down + down, old_up + up})
     end
+
     {:noreply, save_flow(down, up, state)}
   end
 
-  def handle_info({:EXIT, pid, reason}, state(port: port)=state) do
-    with {addr,down, up} <- Process.get(pid) do
+  def handle_info({:EXIT, pid, reason}, state(port: port) = state) do
+    with {addr, down, up} <- Process.get(pid) do
       Shadowsocks.Event.close_conn(port, pid, reason, {down, up})
       Process.delete(pid)
+
       case reason do
         :bad_request ->
           Shadowsocks.Event.bad_request(port, addr)
-        _ -> :ok
+
+        _ ->
+          :ok
       end
     end
+
     {:noreply, state}
   end
+
   def handle_info(msg, state) do
-    IO.puts "bad message: #{inspect msg}"
+    IO.puts("bad message: #{inspect(msg)}")
     {:noreply, state}
   end
 
   def terminate(_, state(port: port, up: up, down: down)) when up > 0 and down > 0 do
     Shadowsocks.Event.sync_flow(port, down, up)
   end
+
   def terminate(_, state) do
     state
   end
 
   defp init_conn(lsock, csock, addr, state) do
-    {:ok, opts} = :inet.getopts(lsock, [:active, :nodelay, :keepalive, :delay_send, :priority, :tos])
+    {:ok, opts} =
+      :inet.getopts(lsock, [:active, :nodelay, :keepalive, :delay_send, :priority, :tos])
+
     :ok = :inet.setopts(csock, opts)
     true = :inet_db.register_socket(csock, :inet_tcp)
     {:ok, pid} = Shadowsocks.Conn.start_link(csock, state(state, :args))
     Process.put(pid, {addr, 0, 0})
+
     case :gen_tcp.controlling_process(csock, pid) do
       :ok ->
         Shadowsocks.Event.open_conn(state(state, :port), pid, addr)
-        send pid, {:shoot, csock}
+        send(pid, {:shoot, csock})
+
       {:error, _} ->
         Process.exit(pid, :kill)
         :gen_tcp.close(csock)
     end
   end
 
-  defp save_flow(down, up, state(up: pup, down: pdown, flow_time: ft)=s) do
-    tick = System.system_time(:milliseconds)
-    case {pup+up, pdown+down} do
+  defp save_flow(down, up, state(up: pup, down: pdown, flow_time: ft) = s) do
+    tick = System.system_time(:millisecond)
+
+    case {pup + up, pdown + down} do
       {u, d} when u > @min_flow or d > @min_flow or tick - ft > @min_time ->
         Shadowsocks.Event.flow(state(s, :port), d, u)
         state(s, up: 0, down: 0, flow_time: tick)
-      {u,d} ->
+
+      {u, d} ->
         state(s, up: u, down: d)
     end
   end
 
-  defp start_udprelay(%{udp: true}=args) do
+  defp start_udprelay(%{udp: true} = args) do
     Shadowsocks.UDPRelay.start_link(args)
   end
+
   defp start_udprelay(_) do
     {:ok, nil}
   end
 
   defp enable_tcp_fastopen(lsock) do
     try do
-      case :os.type do
+      case :os.type() do
         {:unix, :linux} ->
-          :inet.setopts(lsock, [{:raw, @sol_tcp, @tcp_fastopen_linux, <<@tcp_fastopen_queue_length::native-32>>}]);
+          :inet.setopts(lsock, [
+            {:raw, @sol_tcp, @tcp_fastopen_linux, <<@tcp_fastopen_queue_length::native-32>>}
+          ])
+
         os ->
           {:error, {:unknown_os, os}}
       end
@@ -210,46 +243,64 @@ defmodule Shadowsocks.Listener do
     |> validate_arg(:type, &is_atom/1)
     |> validate_arg(:ota, [true, false])
     |> case do
-         %{type: :client}=m ->
-           m
-           |> validate_arg(:server, :required)
-           |> validate_arg(:server, &is_tuple/1)
-         m -> m
-       end
+      %{type: :client} = m ->
+        m
+        |> validate_arg(:server, :required)
+        |> validate_arg(:server, &is_tuple/1)
+
+      m ->
+        m
+    end
     |> case do
-         %{type: :client}=m -> %{m | type: Shadowsocks.Conn.Client}
-         %{type: :server}=m -> %{m | type: Shadowsocks.Conn.Server}
-         %{type: mod}=m when is_atom(mod) ->
-           unless Code.ensure_compiled?(mod) do
-             raise ArgumentError, message: "bad arg type, need :client / :server / module"
-           end
-           m
-         _ -> raise ArgumentError, message: "bad arg type, need :client / :server / module"
-       end
+      %{type: :client} = m ->
+        %{m | type: Shadowsocks.Conn.Client}
+
+      %{type: :server} = m ->
+        %{m | type: Shadowsocks.Conn.Server}
+
+      %{type: mod} = m when is_atom(mod) ->
+        unless Code.ensure_compiled(mod) do
+          raise ArgumentError, message: "bad arg type, need :client / :server / module"
+        end
+
+        m
+
+      _ ->
+        raise ArgumentError, message: "bad arg type, need :client / :server / module"
+    end
     |> case do
-         %{server: {domain, port}}=m when is_binary(domain) ->
-           %{m | server: {String.to_charlist(domain), port}}
-         m -> m
-       end
+      %{server: {domain, port}} = m when is_binary(domain) ->
+        %{m | server: {String.to_charlist(domain), port}}
+
+      m ->
+        m
+    end
   end
 
   defp validate_arg(arg, key, :required) do
     unless Map.has_key?(arg, key) do
       raise ArgumentError, message: "required #{key}"
     end
+
     arg
   end
+
   defp validate_arg(arg, key, fun) when is_function(fun) do
     unless fun.(arg[key]) do
       raise ArgumentError, message: "bad arg #{key} : #{arg[key]}"
     end
+
     arg
   end
+
   defp validate_arg(arg, key, values) when is_list(values) do
     unless Enum.any?(values, &(&1 == arg[key])) do
-      raise ArgumentError, message: "bad arg #{key} : #{arg[key]}, accept values: #{inspect values}"
+      raise ArgumentError,
+        message: "bad arg #{key} : #{arg[key]}, accept values: #{inspect(values)}"
     end
+
     arg
   end
+
   defp downcase(arg, key), do: Map.put(arg, key, String.downcase(arg[key]))
 end

@@ -3,15 +3,19 @@ defmodule Shadowsocks.Protocol do
   use Bitwise
   alias Shadowsocks.Encoder
 
-  @recv_timeout Application.get_env(:shadowsocks, :protocol, []) |> Keyword.get(:recv_timeout, 180000)
+  @recv_timeout Application.get_env(:shadowsocks, :protocol, [])
+                |> Keyword.get(:recv_timeout, 180_000)
 
-  @anti_detect Application.get_env(:shadowsocks, :protocol, [])|> Keyword.get(:anti_detect, true)
-  @anti_max_time Application.get_env(:shadowsocks, :protocol, [])|> Keyword.get(:anti_max_time, 10000)
-  @anti_max_bytes Application.get_env(:shadowsocks, :protocol, [])|> Keyword.get(:anti_max_bytes, 500)
+  @anti_detect Application.get_env(:shadowsocks, :protocol, []) |> Keyword.get(:anti_detect, true)
+  @anti_max_time Application.get_env(:shadowsocks, :protocol, [])
+                 |> Keyword.get(:anti_max_time, 10000)
+  @anti_max_bytes Application.get_env(:shadowsocks, :protocol, [])
+                  |> Keyword.get(:anti_max_bytes, 500)
 
   if @anti_detect and @anti_max_time <= 0 do
     raise RuntimeError, message: "bad config: anti_max_time, must be grater than 1"
   end
+
   if @anti_detect and @anti_max_bytes <= 0 do
     raise RuntimeError, message: "bad config: anti_max_bytes, must be grater than 1"
   end
@@ -31,17 +35,24 @@ defmodule Shadowsocks.Protocol do
         case addr do
           {127, 0, 0, 1} ->
             exit(:normal)
-          {0,0,0,0,0,0xFFFF, 0x7F01,0x0001} ->
+
+          {0, 0, 0, 0, 0, 0xFFFF, 0x7F01, 0x0001} ->
             exit(:normal)
-          {0,0,0,0,0,0,0,1} ->
+
+          {0, 0, 0, 0, 0, 0, 0, 1} ->
             exit(:normal)
+
           "127.0.0.1" ->
             exit(:normal)
+
           "localhost" ->
             exit(:normal)
+
           "::1" ->
             exit(:normal)
-          _ -> addr
+
+          _ ->
+            addr
         end
       end
     end
@@ -57,27 +68,40 @@ defmodule Shadowsocks.Protocol do
     case Stream.recv(sock, byte_size(encoder.enc_iv), Stream.recv_timeout()) do
       {:ok, sock, ivdata} ->
         %Stream{sock: sock, encoder: Encoder.init_decode(encoder, ivdata), ota_iv: ivdata}
+
       {:error, _, :timeout} ->
         exit(:bad_request)
+
       _ ->
         exit(:normal)
     end
   end
+
   def init_stream!(sock, encoder, data) do
-    case byte_size(encoder.enc_iv)-byte_size(data) do
+    case byte_size(encoder.enc_iv) - byte_size(data) do
       n when n > 0 ->
         {sock, rest} = Stream.recv!(sock, n)
         ivdata = <<data::binary, rest::binary>>
         %Stream{sock: sock, encoder: Encoder.init_decode(encoder, ivdata), ota_iv: ivdata}
+
       n when n == 0 ->
         %Stream{sock: sock, encoder: Encoder.init_decode(encoder, data), ota_iv: data}
+
       n when n < 0 ->
         len = byte_size(encoder.enc_iv)
         <<ivdata::binary-size(len), rest::binary>> = data
-        {encoder, rest} = encoder
-            |> Encoder.init_decode(ivdata)
-            |> Shadowsocks.Encoder.decode(rest)
-        %Stream{sock: sock, encoder: encoder, ota_iv: ivdata, recv_rest: {[rest], byte_size(rest)}}
+
+        {encoder, rest} =
+          encoder
+          |> Encoder.init_decode(ivdata)
+          |> Shadowsocks.Encoder.decode(rest)
+
+        %Stream{
+          sock: sock,
+          encoder: encoder,
+          ota_iv: ivdata,
+          recv_rest: {[rest], byte_size(rest)}
+        }
     end
   end
 
@@ -95,20 +119,30 @@ defmodule Shadowsocks.Protocol do
   receive the client request
   """
   def recv_target(stream) do
-    {stream, <<addr_type::8>>} = 
-        case Stream.recv(stream, 1, Stream.recv_timeout()) do
-          {:ok, stream, data} -> {stream, data}
-          {:error, _, :timeout} -> exit(:bad_request)
-          _ -> exit(:normal)
-        end
+    {stream, <<addr_type::8>>} =
+      case Stream.recv(stream, 1, Stream.recv_timeout()) do
+        {:ok, stream, data} -> {stream, data}
+        {:error, _, :timeout} -> exit(:bad_request)
+        _ -> exit(:normal)
+      end
+
     {stream, ipport_bin} = recv_addr(addr_type &&& 0x0F, stream)
 
     ipport = parse_addr(addr_type &&& 0x0F, ipport_bin)
+
     if (addr_type &&& @ota_flag) == @ota_flag do
       {stream, <<hmac::binary-size(@hmac_len)>>} = Stream.recv!(stream, @hmac_len)
-      unless hmac == :crypto.hmac(:sha, [stream.ota_iv, stream.encoder.key], [addr_type,ipport_bin], @hmac_len) do
+
+      unless hmac ==
+               :crypto.hmac(
+                 :sha,
+                 [stream.ota_iv, stream.encoder.key],
+                 [addr_type, ipport_bin],
+                 @hmac_len
+               ) do
         exit(:bad_request)
       end
+
       {%Stream{stream | ota: true}, ipport}
     else
       {stream, ipport}
@@ -118,12 +152,14 @@ defmodule Shadowsocks.Protocol do
   @doc """
   unpack package
   """
-  def unpack(<<@atyp_v4, ip1::8,ip2::8,ip3::8,ip4::8,port::16, rest::binary>>) do
+  def unpack(<<@atyp_v4, ip1::8, ip2::8, ip3::8, ip4::8, port::16, rest::binary>>) do
     {{ip1, ip2, ip3, ip4}, port, rest}
   end
+
   def unpack(<<@atyp_v6, ip::binary-size(16), port::16, rest::binary>>) do
     {for(<<x::16 <- ip>>, do: x) |> List.to_tuple(), port, rest}
   end
+
   def unpack(<<@atyp_dom, len::8, ip::binary-size(len), port::16, rest::binary>>) do
     {String.to_charlist(ip), port, rest}
   end
@@ -134,14 +170,17 @@ defmodule Shadowsocks.Protocol do
   def pack(addr, port, data) when is_tuple(addr) do
     addr =
       :erlang.tuple_to_list(addr)
-      |> :erlang.list_to_binary
+      |> :erlang.list_to_binary()
+
     case byte_size(addr) do
       4 ->
         <<@atyp_v4, addr::binary, port::16, data::binary>>
+
       6 ->
         <<@atyp_v6, addr::binary, port::16, data::binary>>
     end
   end
+
   def pack(addr, port, data) when is_binary(addr) do
     len = byte_size(addr)
     <<@atyp_dom, len::8, addr::binary, port::16, data::binary>>
@@ -159,10 +198,11 @@ defmodule Shadowsocks.Protocol do
     end
   end
 
-  def send_target(%Stream{encoder: encoder, ota: ota}=stream, {atyp, ipport}) do
+  def send_target(%Stream{encoder: encoder, ota: ota} = stream, {atyp, ipport}) do
     if ota do
       ota_atyp = atyp ||| @ota_flag
       hmac = :crypto.hmac(:sha, [encoder.enc_iv, encoder.key], [ota_atyp, ipport], @hmac_len)
+
       %Stream{stream | ota: false}
       |> Stream.send!(<<ota_atyp::8, ipport::binary, hmac::binary>>)
       |> struct(ota: true)
@@ -197,18 +237,23 @@ defmodule Shadowsocks.Protocol do
     # ------ socks5 req -------------------------
     # only support socks5 connect
     <<0x05::8, 0x01::8, 0, atyp::8>> = exactly_recv(sock, 4)
+
     ret =
       case atyp do
-        @atyp_v4 -> exactly_recv(sock, 6)
-        @atyp_v6 -> exactly_recv(sock, 18)
+        @atyp_v4 ->
+          exactly_recv(sock, 6)
+
+        @atyp_v6 ->
+          exactly_recv(sock, 18)
+
         @atyp_dom ->
           <<domlen::8>> = exactly_recv(sock, 1)
-          <<domlen::8, exactly_recv(sock, domlen+2)::binary>>
+          <<domlen::8, exactly_recv(sock, domlen + 2)::binary>>
       end
+
     :ok = :gen_tcp.send(sock, <<0x05, 0x00, 0, 0x01, 0::32, 0::16>>)
     {atyp, ret}
   end
-
 
   defp exactly_recv(sock, size) do
     {:ok, ret} = :gen_tcp.recv(sock, size, @recv_timeout)
@@ -216,6 +261,7 @@ defmodule Shadowsocks.Protocol do
   end
 
   defp recv_http_head(sock, rest \\ "")
+
   defp recv_http_head(sock, rest) do
     ret = exactly_recv(sock, 0)
     rest = rest <> ret
@@ -229,11 +275,13 @@ defmodule Shadowsocks.Protocol do
 
   defp recv_addr(@atyp_v4, sock), do: Stream.recv!(sock, 6)
   defp recv_addr(@atyp_v6, sock), do: Stream.recv!(sock, 18)
+
   defp recv_addr(@atyp_dom, sock) do
     {sock, <<domlen::8>>} = Stream.recv!(sock, 1)
     {sock, ipport} = Stream.recv!(sock, domlen + 2)
     {sock, <<domlen, ipport::binary>>}
   end
+
   if @anti_detect do
     defp recv_addr(_, sock) do
       anti_detect(sock)
@@ -244,9 +292,15 @@ defmodule Shadowsocks.Protocol do
     end
   end
 
-  defp parse_addr(@atyp_v4, <<ip1::8,ip2::8,ip3::8,ip4::8,port::16>>), do: {{ip1,ip2,ip3,ip4}, port}
-  defp parse_addr(@atyp_v6, <<ip::binary-size(16), port::16>>), do: {for(<<x::16 <- ip>>, do: x) |> List.to_tuple(), port}
-  defp parse_addr(@atyp_dom, <<len::8, ip::binary-size(len), port::16>>), do: {String.to_charlist(ip), port}
+  defp parse_addr(@atyp_v4, <<ip1::8, ip2::8, ip3::8, ip4::8, port::16>>),
+    do: {{ip1, ip2, ip3, ip4}, port}
+
+  defp parse_addr(@atyp_v6, <<ip::binary-size(16), port::16>>),
+    do: {for(<<x::16 <- ip>>, do: x) |> List.to_tuple(), port}
+
+  defp parse_addr(@atyp_dom, <<len::8, ip::binary-size(len), port::16>>),
+    do: {String.to_charlist(ip), port}
+
   if @anti_detect do
     defp parse_addr(_, sock) do
       anti_detect(sock)
@@ -261,12 +315,13 @@ defmodule Shadowsocks.Protocol do
     defp anti_detect(sock) do
       delay = :rand.uniform(@anti_max_time)
       :timer.sleep(delay)
+
       if rem(delay, 2) == 0 do
         trashs = :crypto.strong_rand_bytes(:rand.uniform(@anti_max_bytes))
         Stream.send(sock, trashs)
       end
+
       exit(:bad_request)
     end
   end
-
 end

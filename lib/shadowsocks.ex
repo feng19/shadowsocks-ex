@@ -55,7 +55,7 @@ defmodule Shadowsocks do
     * `server` optional `tuple` - required if `type` is `:client`, example: `{"la.ss.org", 8388}`
   """
   def start(args) do
-    Supervisor.start_child(Shadowsocks.ListenerSup, [args])
+    Shadowsocks.ListenerSup.start_child(args)
   end
 
   @doc """
@@ -67,6 +67,7 @@ defmodule Shadowsocks do
     case find_listener(port) do
       [pid] ->
         Shadowsocks.Listener.update(pid, args)
+
       _ ->
         {:error, :not_running}
     end
@@ -79,7 +80,8 @@ defmodule Shadowsocks do
   """
   def stop(port) do
     find_listener(port)
-    |> Enum.each(fn(p)-> Supervisor.terminate_child(Shadowsocks.ListenerSup, p) end)
+    |> Enum.each(fn p -> Supervisor.terminate_child(Shadowsocks.ListenerSup, p) end)
+
     :ok
   end
 
@@ -98,14 +100,13 @@ defmodule Shadowsocks do
   """
   def get(port) do
     case find_listener(port) do
-      [pid|_] -> pid
+      [pid | _] -> pid
       _ -> nil
     end
   end
 
   defp find_listener(port) do
     children = Supervisor.which_children(Shadowsocks.ListenerSup)
-    for {_,p,_,_} <- children, Shadowsocks.Listener.port(p) == port, do: p
+    for {_, p, _, _} <- children, Shadowsocks.Listener.port(p) == port, do: p
   end
-
 end

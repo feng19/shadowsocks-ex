@@ -30,6 +30,7 @@ defmodule EncoderTest do
     {_, d2} = Encoder.decode(e2, d1)
     assert d2 == @data
   end
+
   test "aes-128-cfb" do
     e1 = Encoder.init("aes-128-cfb", @pass)
     e2 = Encoder.init_decode(e1, e1.enc_iv)

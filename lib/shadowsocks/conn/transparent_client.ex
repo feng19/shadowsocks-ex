@@ -1,6 +1,6 @@
 defmodule Shadowsocks.Conn.TransparentClient do
   alias Shadowsocks.Stream
-  @behaviour  Shadowsocks.Conn
+  @behaviour Shadowsocks.Conn
 
   @so_original_dst [{:raw, 0, 80, 16}]
   @ipv6_so_original_dst [{:raw, 41, 80, 16}]
@@ -35,6 +35,7 @@ defmodule Shadowsocks.Conn.TransparentClient do
     else
       {:ok, [{:raw, 0, 80, <<_::16, port::16, ip::32, _::binary>>}]} ->
         {@atyp_v4, <<ip::32, port::16>>}
+
       {:ok, [{:raw, 41, 80, <<_::16, port::16, _::32, ip::binary-size(16), _::binary>>}]} ->
         {@atyp_v6, <<ip::binary, port::16>>}
     end

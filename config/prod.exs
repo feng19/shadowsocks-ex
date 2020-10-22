@@ -1,6 +1,3 @@
 use Mix.Config
 
-config :shadowsocks, :listeners,
-  [
-
-  ]
+config :shadowsocks, :listeners, []

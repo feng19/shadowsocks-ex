@@ -1,15 +1,17 @@
 defmodule Shadowsocks.ListenerSup do
-  use Supervisor
+  use DynamicSupervisor
 
-  def start_link() do
-    Supervisor.start_link(__MODULE__, [], name: Shadowsocks.ListenerSup)
+  def start_link(_) do
+    DynamicSupervisor.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  def init([]) do
-    children = [
-      worker(Shadowsocks.Listener, [], restart: :transient, shutdown: 500)
-    ]
+  def start_child(args) do
+    spec = {Shadowsocks.Listener, args}
+    DynamicSupervisor.start_child(__MODULE__, spec)
+  end
 
-    supervise(children, strategy: :simple_one_for_one)
+  @impl true
+  def init(_) do
+    DynamicSupervisor.init(strategy: :one_for_one, extra_arguments: [])
   end
 end
